@@ -10,6 +10,96 @@ def check_line_token(brutecode,termos):
         last_term=sts
         termos[i_index]=[termos[i_index],line]
 
+def createtable(identtb):
+    global tokenstb
+    global error
+
+    if tokenstb.get(identtb) == None:
+        tokenstb.update({identtb:{}})
+        return(1)
+    else:
+        error = "Ident already in use, please define another ident in line: " + str(inputlist[0][1])
+        return (0)
+
+def inserttoken(token,request):
+    global tokenstb
+    global error
+
+    token_scope = tokenstb.get(token[0])
+
+    for tkn in token[2:]:
+        if request:
+            if token_scope.get(0) != None:
+                new_token = token_scope.get(0)
+                new_token.append(tkn[0])
+                token_scope.update({0: new_token})
+            else:
+                token_scope.update({0: [tkn[0]]})
+        if token_scope.get(tkn[0]) == None:
+            token_scope.update({tkn[0]: token[1]})
+        else:
+            error = "Ident already in use, please define another ident in line: " + str(token[-1][1])
+            return (0)
+    return(1)
+
+def valtype(token):
+    global error
+    
+    for i in range(len(token[2:])):
+        i = i+1
+        if token[i]!=token[i+1]:
+            error = "Ident's type doesn't match - "+token[i]+" | "+token[i+1]+" - in line: "+str(inputlist[0][1])
+            return (0)
+    return(1)
+
+def valproc(token):
+    global tokenstb
+    global error
+
+    token_scope = tokenstb.get(token[0])
+    
+    if len(token_scope.get(0)) != len(token)-1:
+        error = "Invalid number of arguments in line: "+str(inputlist[0][1])
+        return (0)
+    for i in range(len(token_scope.get(0))):
+        requirements = token_scope.get(0)
+        if gettype([token[0],requirements[i]]) != gettype([token[0],token[i+1][0]]):
+            error = "Parameter type doesn't match in procedure '"+token[0]+"' - "+ gettype([token[0],requirements[i]]) +" | "+ gettype([token[0],token[i+1][0]]) +" - in line: "+str(inputlist[0][1])
+            return (0)
+
+def gettype(token):
+    global tokenstb
+    global error
+
+    token_scope = tokenstb.get(token[0])
+    token_global = tokenstb.get(0)
+
+    if token_scope.get(token[-1][0]) != None:
+        return(token_scope.get(token[-1][0]))
+    elif token_global.get(token[-1][0]) != None:
+        return(token_global.get(token[-1][0]))
+    else:
+        error = "Ident '" + token[-1][0] + "' not declared, please define var before use it. Line: " + str(token[-1][1])
+        return (0)    
+
+def loadvar(var):
+    global tokenstb
+    global error
+    global loaded
+    
+    token_scope = tokenstb.get(token[0])
+    token_global = tokenstb.get(0)
+
+    if token_scope.get(var[0]) != None:
+        loaded.append(var[0])
+        return (1)
+    elif token_global.get(var[0]) != None:
+        loaded.append(var[0])
+        return (1)
+    else:
+        error = "Ident '" + var[0] + "' not declared, please define var before use it. Line: " + str(var[1])
+        return (0)
+
 def lexiconanal(brutecode):
     import nltk
     import re
@@ -22,14 +112,37 @@ def lexiconanal(brutecode):
     #print(" ============== \n Lista de Tokens \n =================")
     preservada = {'if', 'then', 'while', 'do', 'write', 'read', 'else', 'begin', 'end', 'var', 'real', 'integer', 'procedure'}
     ssimples = {'(', ')', '*', '/', '+', '-', '>', '<', '$', ';', ':', ',', '.', '='}
-    tratar = {');'}
-    sduplo = {'<>', '>=', '<=', ':='}
+    sduplo = {'<>', '>=', '<=', ':=', '/*', '*/'}
     com1 = False
     com2 = False
     numero = None
     numero_real = None
     check_line_token(brutecode,termos)
+    temp = []
 
+    for [x,termo] in enumerate(termos):
+        i = termo[0]
+        line = termo[1]
+
+        if not re.match('\w+', i):
+            if i not in ssimples and i not in sduplo:
+                d=0
+                while d<len(i):
+                    if d<len(i)-1:
+                        if (i[d]+i[d+1]) in sduplo:
+                            temp.append([i[d]+i[d+1],line])
+                            d+=2
+                        else:
+                            temp.append([i[d],line])
+                            d+=1
+                    else:
+                        temp.append([i[d],line])
+                        d+=1
+            else:
+                temp.append(termos[x])
+        else:
+            temp.append(termos[x])
+    termos = temp
 
     for [i,line] in termos:    
         if com1 == True or com2 == True:
@@ -43,8 +156,8 @@ def lexiconanal(brutecode):
         else:
             if numero!=None and numero_real==None and i!='.':
                 #print(i + ',  Numero Inteiro')
+                inputlist.append([numero,line])
                 numero = None
-                inputlist.append([i,line])
             if numero == None and numero_real == None:
                 if i == '/*':
                     com1 = True
@@ -55,11 +168,9 @@ def lexiconanal(brutecode):
                 elif i in preservada:
                     #print(i + ', Palavra Reservada')
                     inputlist.append([i,line])
-                elif i in tratar:
+                elif i[0] == '(':
                     #print(i[0] + ', Simbolo Simples')
                     inputlist.append([i[0],line])
-                    #print(i[1] + ', Simbolo Simples')
-                    inputlist.append([i[1],line])
                 elif i in ssimples:
                     #print(i + ', Simbolo Simples')
                     inputlist.append([i,line])
@@ -91,21 +202,28 @@ def lexiconanal(brutecode):
 def syntaxanal():
     import re
     global error
+    global token
     errorac = []
+    hypo_code = []
 
     def programa():
         global error
+        global token
 
         if inputlist[0][0]=='program':
             inputlist.pop(0)
+            hypo_code.append("INPP")
             if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
-                inputlist.pop(0)
-                if corpo():
-                    if inputlist[0][0]=='.':
-                        inputlist.pop(0)
-                        return(1)
+                if createtable(0):
+                    inputlist.pop(0)
+                    if corpo():
+                        if inputlist[0][0]=='.':
+                            inputlist.pop(0)
+                            return(1)
+                        else:
+                            error = "Invalid Syntax - expected '.' in line " + str(inputlist[0][1])
+                            return(0)
                     else:
-                        error = "Invalid Syntax - expected '.' in line " + str(inputlist[0][1])
                         return(0)
                 else:
                     return(0)
@@ -171,6 +289,7 @@ def syntaxanal():
 
     def dc_v():
         global error
+        global token
 
         if inputlist[0][0]=='var':
             inputlist.pop(0)
@@ -178,7 +297,11 @@ def syntaxanal():
                 if inputlist[0][0]==':':
                     inputlist.pop(0)
                     if tipo_var():
-                        return(1)
+                        if inserttoken(token,False):
+                            token = [token[0]]
+                            return(1)
+                        else:
+                            return(0)
                     else:
                         return(0)
                 else:
@@ -194,6 +317,7 @@ def syntaxanal():
         global error
 
         if inputlist[0][0]=='real' or inputlist[0][0]=='integer':
+            token.insert(1,inputlist[0][0])
             inputlist.pop(0)
             return(1)
         else:
@@ -204,6 +328,7 @@ def syntaxanal():
         global error
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+            token.append(inputlist[0])
             inputlist.pop(0)
             if mais_var():
                 return(1)
@@ -229,14 +354,19 @@ def syntaxanal():
 
     def dc_p():
         global error
+        global token
 
         if inputlist[0][0]=='procedure':
             inputlist.pop(0)
             if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
-                inputlist.pop(0)
-                if parametros():
-                    if corpo_p():
-                        return(1)
+                if createtable(inputlist[0][0]):
+                    token = [inputlist[0][0]]
+                    inputlist.pop(0)
+                    if parametros():
+                        if corpo_p():
+                            return(1)
+                        else:
+                            return(0)
                     else:
                         return(0)
                 else:
@@ -269,13 +399,18 @@ def syntaxanal():
 
     def lista_par():
         global error
+        global token
 
         if variaveis():
             if inputlist[0][0]==':':
                 inputlist.pop(0)
                 if tipo_var():
-                    if mais_par():
-                        return(1)
+                    if inserttoken(token,True):
+                        token = [token[0]]
+                        if mais_par():
+                            return(1)
+                        else:
+                            return(0)
                     else:
                         return(0)
                 else:
@@ -302,12 +437,14 @@ def syntaxanal():
 
     def corpo_p():
         global error
+        global token
 
         if dc_loc():
             if inputlist[0][0]=='begin':
                 inputlist.pop(0)
                 if comandos():
                     if inputlist[0][0]=='end':
+                        token = [0]
                         inputlist.pop(0)
                         return(1)
                     else:
@@ -350,13 +487,18 @@ def syntaxanal():
 
     def lista_arg():
         global error
+        global token
 
         if inputlist[0][0]=='(':
+            token = [token[-1]]
             inputlist.pop(0)
             if argumentos():
                 if inputlist[0][0]==')':
-                    inputlist.pop(0)
-                    return(1)
+                    if valproc(token):
+                        inputlist.pop(0)
+                        return(1)
+                    else:
+                        return(0)
                 else:
                     error = "Invalid Syntax - expected ')' in line " + str(inputlist[0][1])
                     return(0)
@@ -371,6 +513,7 @@ def syntaxanal():
         global error
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+            token.append(inputlist[0])
             inputlist.pop(0)
             if mais_ident():
                 return(1)
@@ -433,17 +576,23 @@ def syntaxanal():
 
     def comando():
         global error
-
+        global token
+        
+        token = [token[0]]
         if inputlist[0][0]=='read':
             inputlist.pop(0)
             if inputlist[0][0]=='(':
                 inputlist.pop(0)
                 if variaveis():
-                    if inputlist[0][0]==')':
-                        inputlist.pop(0)
-                        return(1)
+                    if loadvar(token.pop()):
+                        # Se existe variável
+                        if inputlist[0][0]==')':
+                            inputlist.pop(0)
+                            return(1)
+                        else:
+                            error = "Invalid Syntax - expected ')' in line " + str(inputlist[0][1])
+                            return(0)
                     else:
-                        error = "Invalid Syntax - expected ')' in line " + str(inputlist[0][1])
                         return(0)
                 else:
                     return(0)
@@ -455,6 +604,7 @@ def syntaxanal():
             if inputlist[0][0]=='(':
                 inputlist.pop(0)
                 if variaveis():
+                    # Se existe variável
                     if inputlist[0][0]==')':
                         inputlist.pop(0)
                         return(1)
@@ -508,6 +658,7 @@ def syntaxanal():
             else:
                 return(0)
         elif re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+            token.append(inputlist[0][0])
             inputlist.pop(0)
             if restoident():
                 return(1)
@@ -519,8 +670,10 @@ def syntaxanal():
 
     def restoident():
         global error
+        global token
 
         if inputlist[0][0]==':=':
+            token[-1] = gettype(token)
             inputlist.pop(0)
             if expressao():
                 return(1)
@@ -555,6 +708,8 @@ def syntaxanal():
             return(0)
 
     def expressao():
+        global token
+
         if termo():
             if outros_termos():
                 return(1)
@@ -576,6 +731,7 @@ def syntaxanal():
 
     def outros_termos():
         global error
+        global token
 
         if op_ad():
             if termo():
@@ -588,7 +744,11 @@ def syntaxanal():
         elif error!=None:
             return(0)
         else:
-            return(1)
+            if valtype(token):
+                token = [token[0]]
+                return(1)
+            else:
+                return(0)
 
     def op_ad():
         global error
@@ -642,12 +802,16 @@ def syntaxanal():
         global error
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+            token.append(inputlist[0])
+            token[-1] = gettype(token)
             inputlist.pop(0)
             return(1)
         elif re.match('\d+.\d+', inputlist[0][0]):
+            token.append('real')
             inputlist.pop(0)
             return(1)
         elif re.match('\d+', inputlist[0][0]):
+            token.append('integer')
             inputlist.pop(0)
             return(1)
         elif inputlist[0][0]=='(':
@@ -666,21 +830,24 @@ def syntaxanal():
             return(0)
 
 
-    try:
-        if programa():
-            print('Syntax Accepted, well done!\n')
-            return(1)
-        else:
-            print(error)
-            return(0)
-    except:
-        error = "Invalid Syntax - Not enough arguments"
+    #try:
+    if programa():
+        print('Syntax Accepted, well done!\n')
+        return(1)
+    else:
         print(error)
         return(0)
+    """except:
+        error = "Invalid Syntax - Not enough arguments"
+        print(error)
+        return(0)"""
 
 
 inputlist = []
 preservada = []
+token = [0]
+loaded = []
+tokenstb = {}
 error = None
 
 txt = open('test.txt', 'r')
@@ -694,5 +861,7 @@ val = lexiconanal(brutecode)
 if val==1:
     val = syntaxanal()
     #print(inputlist)
+    
+teste = [0]
 
 
