@@ -1,3 +1,5 @@
+from interpreter import interpreter
+
 def check_line_token(brutecode,termos):
     line=1
     last_term=0
@@ -66,6 +68,7 @@ def valproc(token):
         if gettype([token[0],requirements[i]]) != gettype([token[0],token[i+1][0]]):
             error = "Parameter type doesn't match in procedure '"+token[0]+"' - "+ gettype([token[0],requirements[i]]) +" | "+ gettype([token[0],token[i+1][0]]) +" - in line: "+str(inputlist[0][1])
             return (0)
+    return (1)
 
 def gettype(token):
     global tokenstb
@@ -99,6 +102,22 @@ def loadvar(var):
     else:
         error = "Ident '" + var[0] + "' not declared, please define var before use it. Line: " + str(var[1])
         return (0)
+
+def searchvarid(var):
+    for i in range(len(datapile)):
+        if datapile[i]==var:
+            return i
+
+def searchprocid(var):
+    for i in range(len(datapile)):
+        if datapile[i][0]==0:
+            if datapile[i][2]==var:
+                return datapile[i][1]
+
+def correctprocret():
+    for i in range(len(datapile)):
+        if datapile[i][0]==0:
+            datapile[i]="ret*"
 
 def lexiconanal(brutecode):
     import nltk
@@ -203,8 +222,10 @@ def syntaxanal():
     import re
     global error
     global token
+    global hypocode
+    global datapile
     errorac = []
-    hypo_code = []
+    localvarnum = []
 
     def programa():
         global error
@@ -212,13 +233,14 @@ def syntaxanal():
 
         if inputlist[0][0]=='program':
             inputlist.pop(0)
-            hypo_code.append("INPP")
+            hypocode.append("INPP")
             if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
                 if createtable(0):
                     inputlist.pop(0)
                     if corpo():
                         if inputlist[0][0]=='.':
                             inputlist.pop(0)
+                            hypocode.append("PARA")
                             return(1)
                         else:
                             error = "Invalid Syntax - expected '.' in line " + str(inputlist[0][1])
@@ -242,6 +264,7 @@ def syntaxanal():
                 inputlist.pop(0)
                 if comandos():
                     if inputlist[0][0]=='end':
+                        correctprocret()
                         inputlist.pop(0)
                         return(1)
                     else:
@@ -329,6 +352,10 @@ def syntaxanal():
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
             token.append(inputlist[0])
+            datapile.append(inputlist[0][0])
+            hypocode.append("ALME 1")
+            if len(localvarnum)>0:
+                localvarnum.append(inputlist[0][0])
             inputlist.pop(0)
             if mais_var():
                 return(1)
@@ -357,8 +384,12 @@ def syntaxanal():
         global token
 
         if inputlist[0][0]=='procedure':
+            hypocode.append("ALME 1")
+            localvarnum.append(len(hypocode))
+            hypocode.append("savespace")
             inputlist.pop(0)
             if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+                datapile.append([0,len(hypocode),inputlist[0][0]])
                 if createtable(inputlist[0][0]):
                     token = [inputlist[0][0]]
                     inputlist.pop(0)
@@ -444,6 +475,10 @@ def syntaxanal():
                 inputlist.pop(0)
                 if comandos():
                     if inputlist[0][0]=='end':
+                        hypocode.append("DESM "+str(len(localvarnum)-1))
+                        hypocode.append("RTPR")
+                        hypocode[localvarnum[0]] = "DSVI "+str(len(hypocode))
+                        localvarnum.clear()
                         token = [0]
                         inputlist.pop(0)
                         return(1)
@@ -488,7 +523,11 @@ def syntaxanal():
     def lista_arg():
         global error
         global token
+        global hypocode
 
+        program = hypocode.pop()
+        localvarnum.append(len(hypocode))
+        hypocode.append("savespace")
         if inputlist[0][0]=='(':
             token = [token[-1]]
             inputlist.pop(0)
@@ -496,6 +535,8 @@ def syntaxanal():
                 if inputlist[0][0]==')':
                     if valproc(token):
                         inputlist.pop(0)
+                        hypocode.append("CHPR "+str(searchprocid(program)))
+                        hypocode[localvarnum[0]] = "PUSHER "+str(len(hypocode))
                         return(1)
                     else:
                         return(0)
@@ -507,6 +548,7 @@ def syntaxanal():
         elif error!=None:
             return(0)
         else:
+            hypocode.append("CHPR "+str(searchprocid(program)))
             return(1)
 
     def argumentos():
@@ -514,6 +556,7 @@ def syntaxanal():
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
             token.append(inputlist[0])
+            hypocode.append("PARAM "+str(searchvarid(inputlist[0][0])))
             inputlist.pop(0)
             if mais_ident():
                 return(1)
@@ -577,6 +620,8 @@ def syntaxanal():
     def comando():
         global error
         global token
+        global hypocode
+        process = []
         
         token = [token[0]]
         if inputlist[0][0]=='read':
@@ -587,6 +632,13 @@ def syntaxanal():
                     if loadvar(token.pop()):
                         # Se existe variável
                         if inputlist[0][0]==')':
+                            while hypocode[-1]=="ALME 1":
+                                process.append("ARMZ "+str(searchvarid(datapile.pop())))
+                                process.append("LEIT")
+                                hypocode.pop()
+                            process.reverse()
+                            hypocode = hypocode[:]+process[:]
+                            process.clear()
                             inputlist.pop(0)
                             return(1)
                         else:
@@ -606,6 +658,13 @@ def syntaxanal():
                 if variaveis():
                     # Se existe variável
                     if inputlist[0][0]==')':
+                        while hypocode[-1]=="ALME 1":
+                            process.append("IMPR")
+                            process.append("CRVL "+str(searchvarid(datapile.pop())))
+                            hypocode.pop()
+                        process.reverse()
+                        hypocode = hypocode[:]+process[:]
+                        process.clear()
                         inputlist.pop(0)
                         return(1)
                     else:
@@ -617,18 +676,22 @@ def syntaxanal():
                 error = "Invalid Syntax - expected '(' in line " + str(inputlist[0][1])
                 return(0)
         elif inputlist[0][0]=='while':
+            localvarnum.append(len(hypocode))
             inputlist.pop(0)
             if condicao():
                 if inputlist[0][0]=='do':
+                    localvarnum.append(len(hypocode))
+                    hypocode.append("savespace")
                     inputlist.pop(0)
-                    if comandos():
-                        if inputlist[0][0]=='$':
-                            inputlist.pop(0)
-                            return(1)
-                        else:
-                            error = "Invalid Syntax - expected '$' in line " + str(inputlist[0][1])
-                            return(0)
+                    comandos()
+                    if inputlist[0][0]=='$':
+                        hypocode.append("DSVI "+str(localvarnum[0]+1))
+                        hypocode[localvarnum[1]] = "DSVF "+str(len(hypocode))
+                        localvarnum.clear()
+                        inputlist.pop(0)
+                        return(1)
                     else:
+                        error = "Invalid Syntax - expected '$' in line " + str(inputlist[0][1])
                         return(0)
                 else:
                     error = "Invalid Syntax - expected 'do' in line " + str(inputlist[0][1])
@@ -639,9 +702,17 @@ def syntaxanal():
             inputlist.pop(0)
             if condicao():
                 if inputlist[0][0]=='then':
+                    localvarnum.append(len(hypocode))
+                    hypocode.append("savespace")
                     inputlist.pop(0)
                     if comandos():
+                        hypocode[localvarnum[0]] = "DSVF "+str(len(hypocode)+1)
+                        localvarnum.clear()
+                        localvarnum.append(len(hypocode))
+                        hypocode.append("savespace")
                         if pfalsa():
+                            hypocode[localvarnum[0]] = "DSVI "+str(len(hypocode))
+                            localvarnum.clear()
                             if inputlist[0][0]=='$':
                                 inputlist.pop(0)
                                 return(1)
@@ -658,6 +729,7 @@ def syntaxanal():
             else:
                 return(0)
         elif re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
+            hypocode.append(inputlist[0][0])
             token.append(inputlist[0][0])
             inputlist.pop(0)
             if restoident():
@@ -671,8 +743,11 @@ def syntaxanal():
     def restoident():
         global error
         global token
+        global hypocode
 
         if inputlist[0][0]==':=':
+            varid = searchvarid(hypocode.pop())
+            hypocode.append("ARMZ "+str(varid))
             token[-1] = gettype(token)
             inputlist.pop(0)
             if expressao():
@@ -689,6 +764,9 @@ def syntaxanal():
         if expressao():
             if relacao():
                 if expressao():
+                    hypocode.append(localvarnum.pop())
+                    localvarnum.clear()
+                    localvarnum.append(len(hypocode))
                     return(1)
                 else:
                     return(0)
@@ -700,7 +778,28 @@ def syntaxanal():
     def relacao():
         global error
 
-        if inputlist[0][0]=='=' or inputlist[0][0]=='<>' or inputlist[0][0]=='>=' or inputlist[0][0]=='<=' or inputlist[0][0]=='>' or inputlist[0][0]=='<':
+        if inputlist[0][0]=='=':
+            localvarnum.append("CPIG")
+            inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='<>':
+            localvarnum.append("CDES")
+            inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='>=':
+            localvarnum.append("CMAI")
+            inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='<=':
+            localvarnum.append("CPMI")
+            inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='>':
+            localvarnum.append("CPMA")
+            inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='<':
+            localvarnum.append("CPME")
             inputlist.pop(0)
             return(1)
         else:
@@ -720,9 +819,37 @@ def syntaxanal():
 
     def op_un():
         global error
+        operators = ["ARMZ"]
 
-        if inputlist[0][0]=='+' or inputlist[0][0]=='-':
+        if inputlist[0][0]=='+':
             inputlist.pop(0)
+            return(1)
+        elif inputlist[0][0]=='-':
+            inputlist.pop(0)
+            if hypocode[-1][:4] in operators:
+                if hypocode[-2]=="SOMA":
+                    temp = hypocode.pop()
+                    hypocode.pop()
+                    hypocode.append("SUBT")
+                    hypocode.append(temp)
+                elif hypocode[-2]=="SUBT":
+                    temp = hypocode.pop()
+                    hypocode.pop()
+                    hypocode.append("SOMA")
+                    hypocode.append(temp)
+                else:
+                    temp = hypocode.pop()
+                    hypocode.append("INVE")
+                    hypocode.append(temp)
+            else:
+                if hypocode[-1]=="SOMA":
+                    hypocode.pop()
+                    hypocode.append("SUBT")
+                elif hypocode[-1]=="SUBT":
+                    hypocode.pop()
+                    hypocode.append("SOMA")
+                else:
+                    hypocode.append("INVE")
             return(1)
         elif error!=None:
             return(0)
@@ -752,9 +879,25 @@ def syntaxanal():
 
     def op_ad():
         global error
+        operators = ["ARMZ"]
 
-        if inputlist[0][0]=='+' or inputlist[0][0]=='-':
+        if inputlist[0][0]=='+':
             inputlist.pop(0)
+            if hypocode[-1][:4] in operators:
+                temp = hypocode.pop()
+                hypocode.append("SOMA")
+                hypocode.append(temp)
+            else:
+                hypocode.append("SOMA")
+            return(1)
+        elif inputlist[0][0]=='-':
+            inputlist.pop(0)
+            if hypocode[-1][:4] in operators:
+                temp = hypocode.pop()
+                hypocode.append("SUBT")
+                hypocode.append(temp)
+            else:
+                hypocode.append("SUBT")
             return(1)
         else:
             errorac.append("Invalid Syntax - expected '+' or '-' in line " + str(inputlist[0][1]))
@@ -772,7 +915,7 @@ def syntaxanal():
         else:
             return(0)
 
-    def mais_fatores():
+    def mais_fatores(): 
         global error
 
         if op_mul():
@@ -791,8 +934,13 @@ def syntaxanal():
     def op_mul():
         global error
 
-        if inputlist[0][0]=='*' or inputlist[0][0]=='/':
+        if inputlist[0][0]=='*':
             inputlist.pop(0)
+            hypocode.append("MULT")
+            return(1)
+        elif inputlist[0][0]=='/':
+            inputlist.pop(0)
+            hypocode.append("DIVI")
             return(1)
         else:
             errorac.append("Invalid Syntax - expected '*' or '/' in line " + str(inputlist[0][1]))
@@ -800,24 +948,99 @@ def syntaxanal():
 
     def fator():
         global error
+        global hypocode
+        operators = ["INVE","SOMA","SUBT","MULT","DIVI"]
+        opend = ["ARMZ"]
 
         if re.match('\w+', inputlist[0][0]) and re.match('[a-zA-Z]', inputlist[0][0][0]) and inputlist[0][0] not in preservada:
             token.append(inputlist[0])
             token[-1] = gettype(token)
+            if hypocode[-1][:4] in opend:
+                if hypocode[-2] in operators:
+                    temp2 = hypocode.pop()
+                    temp1 = hypocode.pop()
+                    hypocode.append("CRVL "+str(searchvarid(inputlist[0][0])))
+                    hypocode.append(temp1)
+                    hypocode.append(temp2)
+                else:
+                    temp = hypocode.pop()
+                    hypocode.append("CRVL "+str(searchvarid(inputlist[0][0])))
+                    hypocode.append(temp)
+            else:
+                if hypocode[-1] in operators:
+                    temp = hypocode.pop()
+                    hypocode.append("CRVL "+str(searchvarid(inputlist[0][0])))
+                    hypocode.append(temp)
+                else:
+                    hypocode.append("CRVL "+str(searchvarid(inputlist[0][0])))
             inputlist.pop(0)
             return(1)
         elif re.match('\d+.\d+', inputlist[0][0]):
             token.append('real')
+            if hypocode[-1][:4] in opend:
+                if hypocode[-2] in operators:
+                    temp2 = hypocode.pop()
+                    temp1 = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp1)
+                    hypocode.append(temp2)
+                else:
+                    temp = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp)
+            else:
+                if hypocode[-1] in operators:
+                    temp = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp)
+                else:
+                    hypocode.append("CRCT "+inputlist[0][0])
             inputlist.pop(0)
             return(1)
         elif re.match('\d+', inputlist[0][0]):
             token.append('integer')
+            if hypocode[-1][:4] in opend:
+                if hypocode[-2] in operators:
+                    temp2 = hypocode.pop()
+                    temp1 = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp1)
+                    hypocode.append(temp2)
+                else:
+                    temp = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp)
+            else:
+                if hypocode[-1] in operators:
+                    temp = hypocode.pop()
+                    hypocode.append("CRCT "+inputlist[0][0])
+                    hypocode.append(temp)
+                else:
+                    hypocode.append("CRCT "+inputlist[0][0])
             inputlist.pop(0)
             return(1)
         elif inputlist[0][0]=='(':
+            if hypocode[-1][:4] in opend:
+                tempp2 = hypocode.pop()
+                tempp1 = hypocode.pop()
+                outside = hypocode[:]
+                hypocode = ["",""]
+            else:
+                tempp1 = None
+                tempp = hypocode.pop()
+                outside = hypocode[:]
+                hypocode = ["",""]
             inputlist.pop(0)
             if expressao():
                 if inputlist[0][0]==')':
+                    if tempp1 is not None :
+                        hypocode = outside[:]+hypocode[2:]
+                        hypocode.append(tempp1)
+                        hypocode.append(tempp2)
+                        tempp1=None
+                    else:
+                        hypocode = outside[:]+hypocode[2:]
+                        hypocode.append(tempp)
                     inputlist.pop(0)
                     return(1)
                 else:
@@ -835,7 +1058,10 @@ def syntaxanal():
         print('Syntax Accepted, well done!\n')
         return(1)
     else:
-        print(error)
+        if error != None:
+            print(error)
+        else:
+            print(errorac.pop())
         return(0)
     """except:
         error = "Invalid Syntax - Not enough arguments"
@@ -849,6 +1075,9 @@ token = [0]
 loaded = []
 tokenstb = {}
 error = None
+hypocode = []
+datapile = []
+
 
 txt = open('test.txt', 'r')
 brutecode = txt.read()
@@ -857,11 +1086,13 @@ txt.close
 val = 0
 
 val = lexiconanal(brutecode)
-#print(inputlist)
+
 if val==1:
     val = syntaxanal()
-    #print(inputlist)
-    
-teste = [0]
+
+if val==1:
+    val = interpreter(hypocode)
+    print ("EOF")
+
 
 
