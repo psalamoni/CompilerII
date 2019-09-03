@@ -1,6 +1,6 @@
 program teste
     /* programa teste */
-    var a,b,c:integer
+    var a,b,c:integer;
     var e:real  
     begin read(a); {ler}
-    c:=d+3. end. 
+    c:=d+3.5 end. 
